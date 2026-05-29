@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import fs from 'fs';
+import path from 'path';
 
 async function main() {
     const [, , flag, prompt] = process.argv;
@@ -45,6 +46,27 @@ async function main() {
                             "required": ["file_path"]
                         }
                     }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "Write",
+                        "description": "Write content to a file",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["file_path", "content"],
+                            "properties": {
+                                "file_path": {
+                                    "type": "string",
+                                    "description": "The path of the file to write to"
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "The content to write to the file"
+                                }
+                            }
+                        }
+                    }
                 }
             ]
         });
@@ -73,8 +95,8 @@ async function main() {
             for (const toolCall of message.tool_calls) {
                 if (toolCall && toolCall.type === "function") {
                     const functionName = toolCall.function.name.toLowerCase()
+                    const args = JSON.parse(toolCall.function.arguments)
                     if (functionName === 'read') {
-                        const args = JSON.parse(toolCall.function.arguments)
                         const { file_path } = args;
                         const content = fs.readFileSync(file_path, 'utf-8')
                         messages.push({
@@ -82,6 +104,25 @@ async function main() {
                             tool_call_id: toolCall.id,
                             content: content,
                         });
+                    }
+                    if (functionName === 'write') {
+                        const { file_path, content } = args;
+                        let result = '';
+                        try {
+                            const dir = path.dirname(file_path);
+                            if (dir) {
+                                fs.mkdirSync(dir, { recursive: true });
+                            }
+                            fs.writeFileSync(file_path, content || '', 'utf-8')
+                            result = `File written successfully to ${file_path}`;
+                        } catch (error) {
+                            result = `Error writing file: ${(error as Error).message}`;
+                        }
+                        messages.push({
+                            role: 'tool',
+                            tool_call_id: toolCall.id,
+                            content: result
+                        })
                     }
                 }
             }
