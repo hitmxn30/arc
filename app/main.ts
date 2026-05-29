@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 async function main() {
     const [, , flag, prompt] = process.argv;
@@ -67,6 +71,23 @@ async function main() {
                             }
                         }
                     }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "Bash",
+                        "description": "Execute a shell command",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["command"],
+                            "properties": {
+                                "command": {
+                                    "type": "string",
+                                    "description": "The command to execute"
+                                }
+                            }
+                        }
+                    }
                 }
             ]
         });
@@ -98,14 +119,18 @@ async function main() {
                     const args = JSON.parse(toolCall.function.arguments)
                     if (functionName === 'read') {
                         const { file_path } = args;
-                        const content = fs.readFileSync(file_path, 'utf-8')
+                        let content = '';
+                        try {
+                            content = fs.readFileSync(file_path, 'utf-8');
+                        } catch (error) {
+                            content = `Error reading file: ${(error as Error).message}`;
+                        }
                         messages.push({
                             role: "tool",
                             tool_call_id: toolCall.id,
                             content: content,
-                        });
-                    }
-                    if (functionName === 'write') {
+                            });
+                    } else if (functionName === 'write') {
                         const { file_path, content } = args;
                         let result = '';
                         try {
@@ -122,7 +147,28 @@ async function main() {
                             role: 'tool',
                             tool_call_id: toolCall.id,
                             content: result
-                        })
+                        });
+                    } else if (functionName === 'bash') {
+                        const { command } = args;
+                        let result = '';
+                        try {
+                            const { stdout, stderr } = await execAsync(command);
+                            result = stdout || stderr || 'Command executed with no output';
+                        } catch (error) {
+                            // If the command failed, error will contain message (and potentially stdout/stderr)
+                            result = `Error executing command: ${(error as Error).message}`;
+                        }
+                        messages.push({
+                            role: 'tool',
+                            tool_call_id: toolCall.id,
+                            content: result
+                        });
+                    } else {
+                        messages.push({
+                            role: 'tool',
+                            tool_call_id: toolCall.id,
+                            content: `Error: Tool ${toolCall.function.name} is not supported.`
+                        });
                     }
                 }
             }
